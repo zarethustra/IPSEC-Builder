@@ -1,0 +1,7 @@
+object-group network VPN-SOURCE-LOCAL
+ network-object 192.0.2.0 255.255.255.0
+
+object-group network VPN-DESTINATION-REMOTE
+ network-object host 198.51.100.1
+
+access-list TO-kearney-VPN extended permit ip object-group VPN-SOURCE-LOCAL object-group VPN-DESTINATION-REMOTE

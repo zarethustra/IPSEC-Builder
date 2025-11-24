@@ -1,5 +1,6 @@
 import argparse
 import ipaddress
+import sys
 
 # Embedded IKEv2 crypto config (printed when requested)
 IKEV2_CRYPTO = '''Phase1
@@ -151,12 +152,25 @@ def validate_networks(cli=None):
         else:
             src_name = input(f"Enter source object-group name [{default_src_name}]: ").strip() or default_src_name
 
+        # Uppercase object-group names for consistency
+        src_name = src_name.upper()
+
         if cli and getattr(cli, 'dst_name', None):
             dst_name = cli.dst_name
         elif cli and getattr(cli, 'create_object_groups', False):
-            dst_name = default_dst_name
+            # In non-interactive mode we require an explicit destination name
+            print("Error: --dst-name is required in non-interactive mode when creating object-groups.")
+            sys.exit(2)
         else:
-            dst_name = input(f"Enter destination object-group name [{default_dst_name}]: ").strip() or default_dst_name
+            # Interactive: prompt until a non-empty destination name is supplied
+            while True:
+                dst_name = input("Enter destination object-group name (required): ").strip()
+                if dst_name:
+                    break
+                print("Destination name is required. Please enter a name.")
+
+        # Uppercase destination object-group name
+        dst_name = dst_name.upper()
 
         def format_object_group(group_name, networks):
             lines = []
@@ -188,6 +202,41 @@ def validate_networks(cli=None):
         print(src_block)
         print()
         print(dst_block)
+        # Determine ACL destination label and build the ACL name (TO-<dest>-VPN)
+        import re
+        # allow letters (any case), numbers and hyphens; will uppercase when building ACL name
+        label_pattern = re.compile(r'^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$')
+        if cli and getattr(cli, 'acl_dest', None):
+            # normalize spaces to single hyphens, strip surrounding hyphens
+            acl_dest = re.sub(r"\s+", '-', cli.acl_dest.strip())
+            acl_dest = acl_dest.strip('-')
+            if not label_pattern.match(acl_dest):
+                print("Error: --acl-dest must contain letters, numbers or hyphens (e.g. kearney or lincoln-north)")
+                sys.exit(2)
+        elif cli and getattr(cli, 'create_object_groups', False):
+            # Non-interactive requires explicit --acl-dest
+            print("Error: --acl-dest is required in non-interactive mode when creating object-groups.")
+            sys.exit(2)
+        else:
+            # Interactive: prompt until a valid destination label is supplied
+            while True:
+                # normalize spaces to hyphens for user-entered labels too
+                raw = input("Enter ACL destination label (e.g., kearney or lincoln-north): ").strip()
+                acl_dest = re.sub(r"\s+", '-', raw)
+                acl_dest = acl_dest.strip('-')
+                if not acl_dest:
+                    print("Destination label is required. Please enter a short label (e.g., kearney).")
+                    continue
+                if not label_pattern.match(acl_dest):
+                    print("Invalid label. Use lowercase letters, numbers and hyphens only (e.g. lincoln-north).")
+                    continue
+                break
+
+        # Build ACL name in uppercase (e.g. TO-KEARNEY-VPN)
+        acl_name = f"TO-{acl_dest.upper()}-VPN"
+        acl_line = f"access-list {acl_name} extended permit ip object-group {src_name} object-group {dst_name}"
+        print("\n--- Access-list ---\n")
+        print(acl_line)
 
         # Print crypto block if requested or if create_object_groups is used and no explicit flag
         crypto_requested = bool((cli and getattr(cli, 'print_crypto', False))) or bool(cli and getattr(cli, 'create_object_groups', False) and not getattr(cli, 'output', None))
@@ -208,10 +257,14 @@ def validate_networks(cli=None):
             save = input("\nSave output to file? (enter path or leave blank to skip): ").strip()
 
         if save:
-            mode = 'a' if (cli and getattr(cli, 'append', False)) else 'w'
+            mode = 'w'
             try:
                 with open(save, mode) as f:
-                    f.write(src_block + "\n\n" + dst_block + "\n")
+                    # include ACL line if present
+                    if acl_name:
+                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n")
+                    else:
+                        f.write(src_block + "\n\n" + dst_block + "\n")
                 print(f"\nSaved object-groups to: {save}")
             except OSError as e:
                 print(f"\nFailed to write file: {e}")
@@ -225,9 +278,9 @@ def _build_arg_parser():
     p.add_argument('--src-name', help='Source object-group name')
     p.add_argument('--dst-name', help='Destination object-group name')
     p.add_argument('--output', help='File path to save object-groups')
-    p.add_argument('--append', action='store_true', help='Append to output file instead of overwriting')
     p.add_argument('--allow-private-peer', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
-    p.add_argument('--print-crypto', dest='print_crypto', action='store_true', help='Print IKEv2 crypto config (from IKEV2 Crypto.txt by default)')
+    p.add_argument('--print-crypto', dest='print_crypto', action='store_true', help='Print the embedded IKEv2 crypto config included in this script')
+    p.add_argument('--acl-dest', dest='acl_dest', help='Short destination label used to build ACL name (script builds TO-<dest>-VPN)')
     return p
 
 

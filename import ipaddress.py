@@ -1,7 +1,7 @@
 import ipaddress
 
 def validate_networks():
-    # Get source networks (allow comma-separated values)
+    # Get source networks (allow comma-separated values)!!
     source_input = input("Enter source network(s) (CIDR or subnet mask format, comma-separated): ").strip()
     sources = [entry.strip() for entry in source_input.split(",") if entry.strip()]
 

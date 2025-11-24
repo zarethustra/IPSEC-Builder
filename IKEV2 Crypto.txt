@@ -1,0 +1,13 @@
+Phase1
+crypto ikev2 policy 1
+ encryption aes-256
+ integrity sha256
+ group 14
+ prf sha256
+ lifetime seconds 86400
+ 
+ Phase2
+crypto ipsec ikev2 ipsec-proposal AES256-SHA256
+ protocol esp encryption aes-256
+ protocol esp integrity sha-256
+

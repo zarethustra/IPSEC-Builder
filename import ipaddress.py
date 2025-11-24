@@ -1,6 +1,21 @@
 import argparse
 import ipaddress
 
+# Embedded IKEv2 crypto config (printed when requested)
+IKEV2_CRYPTO = '''Phase1
+crypto ikev2 policy 1
+ encryption aes-256
+ integrity sha256
+ group 14
+ prf sha256
+ lifetime seconds 86400
+ 
+ Phase2
+crypto ipsec ikev2 ipsec-proposal AES256-SHA256
+ protocol esp encryption aes-256
+ protocol esp integrity sha-256
+'''
+
 
 def validate_networks(cli=None):
     # Get source networks (allow comma-separated values)
@@ -174,6 +189,14 @@ def validate_networks(cli=None):
         print()
         print(dst_block)
 
+        # Print crypto block if requested or if create_object_groups is used and no explicit flag
+        crypto_requested = bool((cli and getattr(cli, 'print_crypto', False))) or bool(cli and getattr(cli, 'create_object_groups', False) and not getattr(cli, 'output', None))
+        if crypto_requested:
+            # Print embedded crypto constant
+            if IKEV2_CRYPTO.strip():
+                print('\n--- Recommended IKEv2 crypto config ---\n')
+                print(IKEV2_CRYPTO.rstrip())
+
         # Optionally write to a file. In non-interactive mode (--create-object-groups)
         # and when no --output is provided, print to stdout and do NOT prompt to save.
         if cli and getattr(cli, 'output', None):
@@ -204,6 +227,7 @@ def _build_arg_parser():
     p.add_argument('--output', help='File path to save object-groups')
     p.add_argument('--append', action='store_true', help='Append to output file instead of overwriting')
     p.add_argument('--allow-private-peer', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
+    p.add_argument('--print-crypto', dest='print_crypto', action='store_true', help='Print IKEv2 crypto config (from IKEV2 Crypto.txt by default)')
     return p
 
 

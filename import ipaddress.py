@@ -1,8 +1,13 @@
+import argparse
 import ipaddress
 
-def validate_networks():
+
+def validate_networks(cli=None):
     # Get source networks (allow comma-separated values)
-    source_input = input("Enter source network(s) (CIDR or subnet mask format, comma-separated): ").strip()
+    if cli and getattr(cli, 'sources', None):
+        source_input = cli.sources.strip()
+    else:
+        source_input = input("Enter source network(s) (CIDR or subnet mask format, comma-separated): ").strip()
     sources = [entry.strip() for entry in source_input.split(",") if entry.strip()]
 
     valid_sources = []
@@ -16,7 +21,10 @@ def validate_networks():
             invalid_sources.append(entry)
 
     # Get destination networks
-    dest_input = input("\nEnter destination networks (comma-separated): ").strip()
+    if cli and getattr(cli, 'destinations', None):
+        dest_input = cli.destinations.strip()
+    else:
+        dest_input = input("\nEnter destination networks (comma-separated): ").strip()
     destinations = [entry.strip() for entry in dest_input.split(",") if entry.strip()]
 
     valid_destinations = []
@@ -30,7 +38,10 @@ def validate_networks():
             invalid_destinations.append(entry)
 
     # Get peer IP address (single host) and ensure it's IPv4 /32 and public
-    peer_input = input("\nEnter peer IP address (IPv4 host or IPv4/32, e.g. 198.51.100.1 or 198.51.100.1/32): ").strip()
+    if cli and getattr(cli, 'peer', None) is not None:
+        peer_input = str(cli.peer).strip()
+    else:
+        peer_input = input("\nEnter peer IP address (IPv4 host or IPv4/32, e.g. 198.51.100.1 or 198.51.100.1/32): ").strip()
     peer_valid = False
     peer_value = None
     peer_reason = None
@@ -56,24 +67,29 @@ def validate_networks():
                     addr = candidate
 
             if addr is not None and peer_reason is None:
-                # require public/global IPv4
-                if getattr(addr, 'is_global', False):
+                # require public/global IPv4 unless CLI allows private peers
+                allow_private = bool(cli and getattr(cli, 'allow_private_peer', False))
+                if allow_private:
                     peer_valid = True
                     peer_value = str(addr)
                 else:
-                    # determine specific non-public reason
-                    if getattr(addr, 'is_private', False):
-                        peer_reason = 'address is private'
-                    elif getattr(addr, 'is_loopback', False):
-                        peer_reason = 'address is loopback'
-                    elif getattr(addr, 'is_link_local', False):
-                        peer_reason = 'address is link-local'
-                    elif getattr(addr, 'is_multicast', False):
-                        peer_reason = 'address is multicast'
-                    elif getattr(addr, 'is_reserved', False):
-                        peer_reason = 'address is reserved'
+                    if getattr(addr, 'is_global', False):
+                        peer_valid = True
+                        peer_value = str(addr)
                     else:
-                        peer_reason = 'address is not a public/global IPv4 address'
+                        # determine specific non-public reason
+                        if getattr(addr, 'is_private', False):
+                            peer_reason = 'address is private'
+                        elif getattr(addr, 'is_loopback', False):
+                            peer_reason = 'address is loopback'
+                        elif getattr(addr, 'is_link_local', False):
+                            peer_reason = 'address is link-local'
+                        elif getattr(addr, 'is_multicast', False):
+                            peer_reason = 'address is multicast'
+                        elif getattr(addr, 'is_reserved', False):
+                            peer_reason = 'address is reserved'
+                        else:
+                            peer_reason = 'address is not a public/global IPv4 address'
         except ValueError:
             peer_reason = 'invalid IP format'
 
@@ -105,13 +121,23 @@ def validate_networks():
             print(f" - {net}")
 
     # Offer to create Cisco IOS object-group output
-    create_og = input("\nCreate Cisco object-group output from valid networks? (y/N): ").strip().lower()
+    if cli and getattr(cli, 'create_object_groups', False):
+        create_og = 'y'
+    else:
+        create_og = input("\nCreate Cisco object-group output from valid networks? (y/N): ").strip().lower()
     if create_og == 'y':
         # default names
         default_src_name = 'VPN-SOURCE-LOCAL'
         default_dst_name = 'VPN-DESTINATION-REMOTE'
-        src_name = input(f"Enter source object-group name [{default_src_name}]: ").strip() or default_src_name
-        dst_name = input(f"Enter destination object-group name [{default_dst_name}]: ").strip() or default_dst_name
+        if cli and getattr(cli, 'src_name', None):
+            src_name = cli.src_name
+        else:
+            src_name = input(f"Enter source object-group name [{default_src_name}]: ").strip() or default_src_name
+
+        if cli and getattr(cli, 'dst_name', None):
+            dst_name = cli.dst_name
+        else:
+            dst_name = input(f"Enter destination object-group name [{default_dst_name}]: ").strip() or default_dst_name
 
         def format_object_group(group_name, networks):
             lines = []
@@ -145,14 +171,35 @@ def validate_networks():
         print(dst_block)
 
         # Optionally write to a file
-        save = input("\nSave output to file? (enter path or leave blank to skip): ").strip()
+        if cli and getattr(cli, 'output', None):
+            save = cli.output
+        else:
+            save = input("\nSave output to file? (enter path or leave blank to skip): ").strip()
+
         if save:
+            mode = 'a' if (cli and getattr(cli, 'append', False)) else 'w'
             try:
-                with open(save, 'w') as f:
+                with open(save, mode) as f:
                     f.write(src_block + "\n\n" + dst_block + "\n")
                 print(f"\nSaved object-groups to: {save}")
             except OSError as e:
                 print(f"\nFailed to write file: {e}")
 
+def _build_arg_parser():
+    p = argparse.ArgumentParser(description='Validate networks and optionally create Cisco object-groups')
+    p.add_argument('--sources', help='Comma-separated source networks (CIDR or subnet mask)')
+    p.add_argument('--destinations', help='Comma-separated destination networks')
+    p.add_argument('--peer', help='Peer IP (IPv4 host or /32)')
+    p.add_argument('--create-object-groups', dest='create_object_groups', action='store_true', help='Create object-group output without interactive prompt')
+    p.add_argument('--src-name', help='Source object-group name')
+    p.add_argument('--dst-name', help='Destination object-group name')
+    p.add_argument('--output', help='File path to save object-groups')
+    p.add_argument('--append', action='store_true', help='Append to output file instead of overwriting')
+    p.add_argument('--allow-private-peer', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
+    return p
+
+
 if __name__ == "__main__":
-    validate_networks()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+    validate_networks(cli=args)

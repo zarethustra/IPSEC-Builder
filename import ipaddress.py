@@ -131,11 +131,15 @@ def validate_networks(cli=None):
         default_dst_name = 'VPN-DESTINATION-REMOTE'
         if cli and getattr(cli, 'src_name', None):
             src_name = cli.src_name
+        elif cli and getattr(cli, 'create_object_groups', False):
+            src_name = default_src_name
         else:
             src_name = input(f"Enter source object-group name [{default_src_name}]: ").strip() or default_src_name
 
         if cli and getattr(cli, 'dst_name', None):
             dst_name = cli.dst_name
+        elif cli and getattr(cli, 'create_object_groups', False):
+            dst_name = default_dst_name
         else:
             dst_name = input(f"Enter destination object-group name [{default_dst_name}]: ").strip() or default_dst_name
 
@@ -170,9 +174,13 @@ def validate_networks(cli=None):
         print()
         print(dst_block)
 
-        # Optionally write to a file
+        # Optionally write to a file. In non-interactive mode (--create-object-groups)
+        # and when no --output is provided, print to stdout and do NOT prompt to save.
         if cli and getattr(cli, 'output', None):
             save = cli.output
+        elif cli and getattr(cli, 'create_object_groups', False):
+            # non-interactive: don't prompt to save, output already printed to stdout
+            save = None
         else:
             save = input("\nSave output to file? (enter path or leave blank to skip): ").strip()
 

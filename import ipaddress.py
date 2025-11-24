@@ -104,5 +104,55 @@ def validate_networks():
         for net in invalid_destinations:
             print(f" - {net}")
 
+    # Offer to create Cisco IOS object-group output
+    create_og = input("\nCreate Cisco object-group output from valid networks? (y/N): ").strip().lower()
+    if create_og == 'y':
+        # default names
+        default_src_name = 'VPN-SOURCE-LOCAL'
+        default_dst_name = 'VPN-DESTINATION-REMOTE'
+        src_name = input(f"Enter source object-group name [{default_src_name}]: ").strip() or default_src_name
+        dst_name = input(f"Enter destination object-group name [{default_dst_name}]: ").strip() or default_dst_name
+
+        def format_object_group(group_name, networks):
+            lines = []
+            lines.append(f"object-group network {group_name}")
+            for n in networks:
+                try:
+                    net = ipaddress.ip_network(n, strict=False)
+                    addr = str(net.network_address)
+                    # convert to Cisco IOS network-object format for IPv4
+                    if net.version == 4:
+                        if net.prefixlen == 32:
+                            # prefer the 'host' form for single-address networks
+                            lines.append(f" network-object host {addr}")
+                        else:
+                            netmask = str(net.netmask)
+                            lines.append(f" network-object {addr} {netmask}")
+                    else:
+                        # For IPv6, use the CIDR form as a comment (IOS object-groups are IPv4-focused)
+                        lines.append(f" ! skipping IPv6 entry: {n}")
+                        continue
+                except ValueError:
+                    lines.append(f" ! invalid entry skipped: {n}")
+            return "\n".join(lines)
+
+        src_block = format_object_group(src_name, valid_sources)
+        dst_block = format_object_group(dst_name, valid_destinations)
+
+        print("\n--- Generated object-groups ---\n")
+        print(src_block)
+        print()
+        print(dst_block)
+
+        # Optionally write to a file
+        save = input("\nSave output to file? (enter path or leave blank to skip): ").strip()
+        if save:
+            try:
+                with open(save, 'w') as f:
+                    f.write(src_block + "\n\n" + dst_block + "\n")
+                print(f"\nSaved object-groups to: {save}")
+            except OSError as e:
+                print(f"\nFailed to write file: {e}")
+
 if __name__ == "__main__":
     validate_networks()

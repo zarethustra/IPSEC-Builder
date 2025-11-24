@@ -1,0 +1,4 @@
+object-group network VPN-SOURCE-LOCAL
+ network-object x.x.x.x 255.255.255.0
+object-group network VPN-DESTINATION-REMOTE
+ network-object y.y.y.y 255.255.255.0

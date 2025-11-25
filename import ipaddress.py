@@ -26,10 +26,10 @@ def validate_networks(cli=None):
             missing_args.append('--destinations')
         if not getattr(cli, 'dst_name', None):
             missing_args.append('--dst-name')
-        if not getattr(cli, 'acl_dest', None):
-            missing_args.append('--acl-dest')
         if not getattr(cli, 'crypto_map_seq', None):
             missing_args.append('--crypto-map-seq')
+        if not getattr(cli, 'pre_shared_key', None):
+            missing_args.append('--pre-shared-key')
         if missing_args:
             print(f"Error: The following required arguments are missing in non-interactive mode: {', '.join(missing_args)}")
             sys.exit(2)
@@ -171,17 +171,17 @@ def validate_networks(cli=None):
         src_name = src_name.upper()
 
         if cli and getattr(cli, 'dst_name', None):
-            dst_name = cli.dst_name
+            dst_name_input = cli.dst_name
         else:
             # Interactive: prompt until a non-empty destination name is supplied
             while True:
-                dst_name = input("Enter destination object-group name (required): ").strip()
-                if dst_name:
+                dst_name_input = input("Enter destination name (will be formatted as VPN-{name}-REMOTE): ").strip()
+                if dst_name_input:
                     break
                 print("Destination name is required. Please enter a name.")
 
-        # Uppercase destination object-group name
-        dst_name = dst_name.upper()
+        # Build full destination object-group name (VPN-{input}-REMOTE)
+        dst_name = f"VPN-{dst_name_input.upper()}-REMOTE"
 
         def format_object_group(group_name, networks):
             lines = []
@@ -213,34 +213,9 @@ def validate_networks(cli=None):
         print(src_block)
         print()
         print(dst_block)
-        # Determine ACL destination label and build the ACL name (TO-<dest>-VPN)
-        import re
-        # allow letters (any case), numbers and hyphens; will uppercase when building ACL name
-        label_pattern = re.compile(r'^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$')
-        if cli and getattr(cli, 'acl_dest', None):
-            # normalize spaces to single hyphens, strip surrounding hyphens
-            acl_dest = re.sub(r"\s+", '-', cli.acl_dest.strip())
-            acl_dest = acl_dest.strip('-')
-            if not label_pattern.match(acl_dest):
-                print("Error: --acl-dest must contain letters, numbers or hyphens (e.g. kearney or lincoln-north)")
-                sys.exit(2)
-        else:
-            # Interactive: prompt until a valid destination label is supplied
-            while True:
-                # normalize spaces to hyphens for user-entered labels too
-                raw = input("Enter ACL destination label (e.g., kearney or lincoln-north): ").strip()
-                acl_dest = re.sub(r"\s+", '-', raw)
-                acl_dest = acl_dest.strip('-')
-                if not acl_dest:
-                    print("Destination label is required. Please enter a short label (e.g., kearney).")
-                    continue
-                if not label_pattern.match(acl_dest):
-                    print("Invalid label. Use lowercase letters, numbers and hyphens only (e.g. lincoln-north).")
-                    continue
-                break
-
-        # Build ACL name in uppercase (e.g. TO-KEARNEY-VPN)
-        acl_name = f"TO-{acl_dest.upper()}-VPN"
+        
+        # Build ACL name from the original destination input (TO-<dst_name_input>-VPN)
+        acl_name = f"TO-{dst_name_input.upper()}-VPN"
         acl_line = f"access-list {acl_name} extended permit ip object-group {src_name} object-group {dst_name}"
         print("\n--- Access-list ---\n")
         print(acl_line)
@@ -303,6 +278,27 @@ def validate_networks(cli=None):
         print("\n--- Crypto Map ---\n")
         print(crypto_map_output)
 
+        # Get pre-shared key (required)
+        if cli and getattr(cli, 'pre_shared_key', None):
+            pre_shared_key = cli.pre_shared_key
+        else:
+            while True:
+                pre_shared_key = input("\nEnter pre-shared key (required, non-empty): ").strip()
+                if pre_shared_key:
+                    break
+                print("Pre-shared key is required. Please enter a value.")
+
+        # Generate tunnel-group lines
+        tunnel_group_lines = [
+            f"tunnel-group {peer_value} type ipsec-l2l",
+            f"tunnel-group {peer_value} ipsec-attributes",
+            f" ikev2 remote-authentication pre-shared-key {pre_shared_key}",
+            f" ikev2 local-authentication pre-shared-key {pre_shared_key}"
+        ]
+        tunnel_group_output = "\n".join(tunnel_group_lines)
+        print("\n--- Tunnel Group ---\n")
+        print(tunnel_group_output)
+
         # Print crypto block if requested or if create_object_groups is used and no explicit flag
         crypto_requested = bool((cli and getattr(cli, 'print_crypto', False))) or bool(cli and getattr(cli, 'create_object_groups', False) and not getattr(cli, 'output', None))
         if crypto_requested:
@@ -325,9 +321,9 @@ def validate_networks(cli=None):
             mode = 'w'
             try:
                 with open(save, mode) as f:
-                    # include ACL line, NAT statement, and crypto map if present
+                    # include ACL line, NAT statement, crypto map, and tunnel-group if present
                     if acl_name:
-                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n\n" + nat_line + "\n\n" + crypto_map_output + "\n")
+                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n\n" + nat_line + "\n\n" + crypto_map_output + "\n\n" + tunnel_group_output + "\n")
                     else:
                         f.write(src_block + "\n\n" + dst_block + "\n")
                 print(f"\nSaved object-groups to: {save}")
@@ -335,21 +331,69 @@ def validate_networks(cli=None):
                 print(f"\nFailed to write file: {e}")
 
 def _build_arg_parser():
-    p = argparse.ArgumentParser(description='Validate networks and optionally create Cisco object-groups')
-    p.add_argument('--sources', help='Comma-separated source networks (CIDR or subnet mask)')
-    p.add_argument('--destinations', help='Comma-separated destination networks')
-    p.add_argument('--peer', help='Peer IP (IPv4 host or /32)')
-    p.add_argument('--create-object-groups', dest='create_object_groups', action='store_true', help='Create object-group output without interactive prompt')
-    p.add_argument('--src-name', help='Source object-group name')
-    p.add_argument('--dst-name', help='Destination object-group name')
-    p.add_argument('--output', help='File path to save object-groups')
-    p.add_argument('--allow-private-peer', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
-    p.add_argument('--print-crypto', dest='print_crypto', action='store_true', help='Print the embedded IKEv2 crypto config included in this script')
-    p.add_argument('--acl-dest', dest='acl_dest', help='Short destination label used to build ACL name (script builds TO-<dest>-VPN)')
-    p.add_argument('--nat-inside', dest='nat_inside', help='NAT Inside interface name (default: Inside)')
-    p.add_argument('--nat-outside', dest='nat_outside', help='NAT Outside interface name (default: Outside)')
-    p.add_argument('--crypto-map-name', dest='crypto_map_name', help='Crypto map name (default: outside_map)')
-    p.add_argument('--crypto-map-seq', dest='crypto_map_seq', help='Crypto map sequence number (required for crypto map generation)')
+    p = argparse.ArgumentParser(
+        description='Create IPSec VPN for Cisco ASA',
+        epilog='''
+REQUIRED ARGUMENTS (for non-interactive mode ):
+  Short  Long                     Description
+  ------  ---------------------   ------------------------------------------
+  -s      --sources               Comma-separated source networks (CIDR or subnet mask) [REQUIRED]
+  -d      --destinations          Comma-separated destination networks [REQUIRED]
+  -dn     --dst-name              Destination object-group name [REQUIRED]
+  -cms    --crypto-map-seq        Crypto map sequence number (integer) [REQUIRED]
+  -psk    --pre-shared-key        Pre-shared key for tunnel-group [REQUIRED]
+
+OPTIONAL ARGUMENTS WITH DEFAULTS:
+  Short  Long                     Description
+  ------  ---------------------   ------------------------------------------
+  -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED for validation]
+  -sn     --src-name              Source object-group name [default: VPN-SOURCE-LOCAL]
+  -ni     --nat-inside            NAT Inside interface name [default: Inside]
+  -no     --nat-outside           NAT Outside interface name [default: Outside]
+  -cmn    --crypto-map-name       Crypto map name [default: outside_map]
+
+OPTIONAL OUTPUT/CONTROL ARGUMENTS:
+  Short  Long                     Description
+  ------  ---------------------   ------------------------------------------
+  -o      --output                File path to save object-groups
+  -ap     --allow-private-peer    Allow private/non-global peer addresses
+  -pc     --print-crypto          Print the embedded IKEv2 crypto config
+  -c      --create-object-groups  Create object-group output without interactive prompt
+
+USAGE EXAMPLES:
+  Interactive mode (prompts for values):
+    python import ipaddress.py
+
+  Non-interactive mode with required arguments (using SHORT versions):
+    python import ipaddress.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+      -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!"
+
+  Non-interactive mode with required arguments (using LONG versions):
+    python import ipaddress.py --create-object-groups --sources 10.0.0.0/24 \\
+      --destinations 192.168.0.0/24 --peer 203.0.113.1 --dst-name VPN-DESTINATION-REMOTE \\
+      --crypto-map-seq 5 --pre-shared-key "SecureKey123!"
+
+  Non-interactive mode with custom NAT and crypto map (SHORT versions):
+    python import ipaddress.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+      -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!" \\
+      -ni LAN -no WAN -cmn site1_vpn -o config.txt
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument('--sources', '-s', help='Comma-separated source networks (CIDR or subnet mask)')
+    p.add_argument('--destinations', '-d', help='Comma-separated destination networks')
+    p.add_argument('--peer', '-p', help='Peer IP (IPv4 host or /32)')
+    p.add_argument('--create-object-groups', '-c', dest='create_object_groups', action='store_true', help='Create object-group output without interactive prompt')
+    p.add_argument('--src-name', '-sn', help='Source object-group name')
+    p.add_argument('--dst-name', '-dn', help='Destination object-group name')
+    p.add_argument('--output', '-o', help='File path to save object-groups')
+    p.add_argument('--allow-private-peer', '-ap', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
+    p.add_argument('--print-crypto', '-pc', dest='print_crypto', action='store_true', help='Print the embedded IKEv2 crypto config included in this script')
+    p.add_argument('--nat-inside', '-ni', dest='nat_inside', help='NAT Inside interface name (default: Inside)')
+    p.add_argument('--nat-outside', '-no', dest='nat_outside', help='NAT Outside interface name (default: Outside)')
+    p.add_argument('--crypto-map-name', '-cmn', dest='crypto_map_name', help='Crypto map name (default: outside_map)')
+    p.add_argument('--crypto-map-seq', '-cms', dest='crypto_map_seq', help='Crypto map sequence number (required for crypto map generation)')
+    p.add_argument('--pre-shared-key', '-psk', dest='pre_shared_key', help='Pre-shared key for tunnel-group (required in non-interactive mode)')
     return p
 
 

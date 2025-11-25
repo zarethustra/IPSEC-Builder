@@ -1,0 +1,4 @@
+tunnel-group PEERIP type ipsec-l2l
+tunnel-group PEERIP ipsec-attributes
+ ikev2 remote-authentication pre-shared-key PRE_SHARED_KEY
+ ikev2 local-authentication pre-shared-key PRE_SHARED_KEY

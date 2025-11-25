@@ -19,6 +19,21 @@ crypto ipsec ikev2 ipsec-proposal AES256-SHA256
 
 
 def validate_networks(cli=None):
+    # Validate required arguments in non-interactive mode upfront
+    if cli and getattr(cli, 'create_object_groups', False):
+        missing_args = []
+        if not getattr(cli, 'destinations', None):
+            missing_args.append('--destinations')
+        if not getattr(cli, 'dst_name', None):
+            missing_args.append('--dst-name')
+        if not getattr(cli, 'acl_dest', None):
+            missing_args.append('--acl-dest')
+        if not getattr(cli, 'crypto_map_seq', None):
+            missing_args.append('--crypto-map-seq')
+        if missing_args:
+            print(f"Error: The following required arguments are missing in non-interactive mode: {', '.join(missing_args)}")
+            sys.exit(2)
+    
     # Get source networks (allow comma-separated values)
     if cli and getattr(cli, 'sources', None):
         source_input = cli.sources.strip()
@@ -157,10 +172,6 @@ def validate_networks(cli=None):
 
         if cli and getattr(cli, 'dst_name', None):
             dst_name = cli.dst_name
-        elif cli and getattr(cli, 'create_object_groups', False):
-            # In non-interactive mode we require an explicit destination name
-            print("Error: --dst-name is required in non-interactive mode when creating object-groups.")
-            sys.exit(2)
         else:
             # Interactive: prompt until a non-empty destination name is supplied
             while True:
@@ -213,10 +224,6 @@ def validate_networks(cli=None):
             if not label_pattern.match(acl_dest):
                 print("Error: --acl-dest must contain letters, numbers or hyphens (e.g. kearney or lincoln-north)")
                 sys.exit(2)
-        elif cli and getattr(cli, 'create_object_groups', False):
-            # Non-interactive requires explicit --acl-dest
-            print("Error: --acl-dest is required in non-interactive mode when creating object-groups.")
-            sys.exit(2)
         else:
             # Interactive: prompt until a valid destination label is supplied
             while True:
@@ -277,10 +284,6 @@ def validate_networks(cli=None):
             except ValueError:
                 print("Error: --crypto-map-seq must be a valid integer")
                 sys.exit(2)
-        elif cli and getattr(cli, 'create_object_groups', False):
-            # Non-interactive requires explicit --crypto-map-seq
-            print("Error: --crypto-map-seq is required in non-interactive mode when creating object-groups.")
-            sys.exit(2)
         else:
             while crypto_map_seq is None:
                 seq_input = input("Enter crypto map sequence number (required, integer): ").strip()

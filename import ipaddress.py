@@ -238,6 +238,28 @@ def validate_networks(cli=None):
         print("\n--- Access-list ---\n")
         print(acl_line)
 
+        # Get NAT interface names (Inside and Outside)
+        default_inside = 'Inside'
+        default_outside = 'Outside'
+        if cli and getattr(cli, 'nat_inside', None):
+            nat_inside = cli.nat_inside
+        elif cli and getattr(cli, 'create_object_groups', False):
+            nat_inside = default_inside
+        else:
+            nat_inside = input(f"\nEnter NAT Inside interface name [{default_inside}]: ").strip() or default_inside
+
+        if cli and getattr(cli, 'nat_outside', None):
+            nat_outside = cli.nat_outside
+        elif cli and getattr(cli, 'create_object_groups', False):
+            nat_outside = default_outside
+        else:
+            nat_outside = input(f"Enter NAT Outside interface name [{default_outside}]: ").strip() or default_outside
+
+        # Generate NAT statement
+        nat_line = f"nat ({nat_inside},{nat_outside}) source static {src_name} {src_name} destination static {dst_name} {dst_name}  no-proxy-arp route-lookup"
+        print("\n--- NAT Statement ---\n")
+        print(nat_line)
+
         # Print crypto block if requested or if create_object_groups is used and no explicit flag
         crypto_requested = bool((cli and getattr(cli, 'print_crypto', False))) or bool(cli and getattr(cli, 'create_object_groups', False) and not getattr(cli, 'output', None))
         if crypto_requested:
@@ -260,9 +282,9 @@ def validate_networks(cli=None):
             mode = 'w'
             try:
                 with open(save, mode) as f:
-                    # include ACL line if present
+                    # include ACL line and NAT statement if present
                     if acl_name:
-                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n")
+                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n\n" + nat_line + "\n")
                     else:
                         f.write(src_block + "\n\n" + dst_block + "\n")
                 print(f"\nSaved object-groups to: {save}")
@@ -281,6 +303,8 @@ def _build_arg_parser():
     p.add_argument('--allow-private-peer', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
     p.add_argument('--print-crypto', dest='print_crypto', action='store_true', help='Print the embedded IKEv2 crypto config included in this script')
     p.add_argument('--acl-dest', dest='acl_dest', help='Short destination label used to build ACL name (script builds TO-<dest>-VPN)')
+    p.add_argument('--nat-inside', dest='nat_inside', help='NAT Inside interface name (default: Inside)')
+    p.add_argument('--nat-outside', dest='nat_outside', help='NAT Outside interface name (default: Outside)')
     return p
 
 

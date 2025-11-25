@@ -1,0 +1,1 @@
+nat (Inside,Outside) source static VPN-ID-LOCAL VPN-ID-LOCAL destination static VPN-DESTINATION-REMOTE VPN-DESTINATION-REMOTE  no-proxy-arp route-lookup 

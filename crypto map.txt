@@ -1,0 +1,4 @@
+crypto map outside_map # match address TO-DESTINATION-VPN
+crypto map outside_map # set peer PEERIP
+crypto map outside_map # set ikev2 ipsec-proposal AES256-SHA256
+crypto map outside_map # set security-association lifetime seconds 28800

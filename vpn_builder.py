@@ -307,21 +307,13 @@ def save_config_to_file(file_path: str, config_content: str):
 def _build_arg_parser():
     p = argparse.ArgumentParser(
         description='Create IPSec VPN configuration for Cisco ASA.',
-        epilog='''
-The script automatically generates the full VPN configuration whenever valid inputs are provided.
-
-REQUIRED ARGUMENTS (for non-interactive CLI usage):
-  -s, --sources, -d, --destinations, -dn, --dst-name, 
-  -cms, --crypto-map-seq, -psk, --pre-shared-key, -p, --peer
-  
-Run the script without any arguments to enter interactive mode.
-        ''',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=False
     )
+    p.add_argument('--help', '-h', dest='custom_help', action='store_true', help='show this help message and exit')
     p.add_argument('--sources', '-s', help='Comma-separated source networks (CIDR or subnet mask)')
     p.add_argument('--destinations', '-d', help='Comma-separated destination networks')
     p.add_argument('--peer', '-p', help='Peer IP (IPv4 host or /32)')
-    # REMOVED: '--create-object-groups', '-c'
     p.add_argument('--src-name', '-sn', help='Source object-group name')
     p.add_argument('--dst-name', '-dn', help='Destination object-group name (REQUIRED)')
     p.add_argument('--output', '-o', help='File path to save configuration')
@@ -333,7 +325,7 @@ Run the script without any arguments to enter interactive mode.
     p.add_argument('--crypto-map-seq', '-cms', dest='crypto_map_seq', help='Crypto map sequence number (REQUIRED)')
     p.add_argument('--pre-shared-key', '-psk', dest='pre_shared_key', help='Pre-shared key for tunnel-group (REQUIRED)')
     return p
-def print_help_format():
+def print_custom_help():
     """
     Prints a manually formatted, categorized help section to exactly match 
     the original columnar output from the script.
@@ -386,7 +378,6 @@ USAGE EXAMPLES:
 """
     print(formatted_help_content)
 
-# To use this, you would call: print_original_help_format()
 
 # --- Main Execution Block (Orchestration) ---
 
@@ -394,6 +385,9 @@ if __name__ == "__main__":
     
     parser = _build_arg_parser()
     args = parser.parse_args()
+    if args.custom_help:
+        print_custom_help()  # Call your custom function
+        sys.exit(0)          # Exit cleanly    
 
     try:
         # Step 1: Get all inputs (CLI or Interactive)

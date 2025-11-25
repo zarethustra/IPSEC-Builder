@@ -333,11 +333,65 @@ Run the script without any arguments to enter interactive mode.
     p.add_argument('--crypto-map-seq', '-cms', dest='crypto_map_seq', help='Crypto map sequence number (REQUIRED)')
     p.add_argument('--pre-shared-key', '-psk', dest='pre_shared_key', help='Pre-shared key for tunnel-group (REQUIRED)')
     return p
+def print_help_format():
+    """
+    Prints a manually formatted, categorized help section to exactly match 
+    the original columnar output from the script.
+    """
+    # Note: Using a multiline string and monospace formatting for precise column alignment.
+    formatted_help_content = """\
+REQUIRED ARGUMENTS (for non-interactive mode ):
+  Short   Long                    Description
+  ------  ---------------------   ------------------------------------------
+  -s      --sources               Comma-separated source networks (CIDR or subnet mask) [REQUIRED]
+  -d      --destinations          Comma-separated destination networks [REQUIRED]
+  -dn     --dst-name              Destination object-group name [REQUIRED]
+  -cms    --crypto-map-seq        Crypto map sequence number (integer) [REQUIRED]
+  -psk    --pre-shared-key        Pre-shared key for tunnel-group [REQUIRED]
 
+OPTIONAL ARGUMENTS WITH DEFAULTS:
+  Short   Long                    Description
+  ------  ---------------------   ------------------------------------------
+  -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED for validation]
+  -sn     --src-name              Source object-group name [default: VPN-SOURCE-LOCAL]
+  -ni     --nat-inside            NAT Inside interface name [default: Inside]
+  -no     --nat-outside           NAT Outside interface name [default: Outside]
+  -cmn    --crypto-map-name       Crypto map name [default: outside_map]
+
+OPTIONAL OUTPUT/CONTROL ARGUMENTS:
+  Short   Long                    Description
+  ------  ---------------------   ------------------------------------------
+  -o      --output                File path to save object-groups
+  -ap     --allow-private-peer    Allow private/non-global peer addresses
+  -pc     --print-crypto          Print the embedded IKEv2 crypto config
+  -c      --create-object-groups  Create object-group output without interactive prompt
+
+USAGE EXAMPLES:
+  Interactive mode (prompts for values):
+    python asa_vpn_creator.py
+
+  Non-interactive mode with required arguments (using SHORT versions):
+    python asa_vpn_creator.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+      -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!"
+
+  Non-interactive mode with required arguments (using LONG versions):
+    python asa_vpn_creator.py --create-object-groups --sources 10.0.0.0/24 \\
+      --destinations 192.168.0.0/24 --peer 203.0.113.1 --dst-name VPN-DESTINATION-REMOTE \\
+      --crypto-map-seq 5 --pre-shared-key "SecureKey123!"
+
+  Non-interactive mode with custom NAT and crypto map (SHORT versions):
+    python asa_vpn_creator.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+      -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!" \\
+      -ni LAN -no WAN -cmn site1_vpn -o config.txt
+"""
+    print(formatted_help_content)
+
+# To use this, you would call: print_original_help_format()
 
 # --- Main Execution Block (Orchestration) ---
 
 if __name__ == "__main__":
+    
     parser = _build_arg_parser()
     args = parser.parse_args()
 

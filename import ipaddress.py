@@ -260,6 +260,46 @@ def validate_networks(cli=None):
         print("\n--- NAT Statement ---\n")
         print(nat_line)
 
+        # Get crypto map configuration
+        default_crypto_map_name = 'outside_map'
+        if cli and getattr(cli, 'crypto_map_name', None):
+            crypto_map_name = cli.crypto_map_name
+        elif cli and getattr(cli, 'create_object_groups', False):
+            crypto_map_name = default_crypto_map_name
+        else:
+            crypto_map_name = input(f"\nEnter crypto map name [{default_crypto_map_name}]: ").strip() or default_crypto_map_name
+
+        # Crypto map sequence number is required
+        crypto_map_seq = None
+        if cli and getattr(cli, 'crypto_map_seq', None) is not None:
+            try:
+                crypto_map_seq = int(cli.crypto_map_seq)
+            except ValueError:
+                print("Error: --crypto-map-seq must be a valid integer")
+                sys.exit(2)
+        elif cli and getattr(cli, 'create_object_groups', False):
+            # Non-interactive requires explicit --crypto-map-seq
+            print("Error: --crypto-map-seq is required in non-interactive mode when creating object-groups.")
+            sys.exit(2)
+        else:
+            while crypto_map_seq is None:
+                seq_input = input("Enter crypto map sequence number (required, integer): ").strip()
+                try:
+                    crypto_map_seq = int(seq_input)
+                except ValueError:
+                    print("Invalid input. Please enter a valid integer.")
+
+        # Generate crypto map lines
+        crypto_map_lines = [
+            f"crypto map {crypto_map_name} {crypto_map_seq} match address {acl_name}",
+            f"crypto map {crypto_map_name} {crypto_map_seq} set peer {peer_value}",
+            f"crypto map {crypto_map_name} {crypto_map_seq} set ikev2 ipsec-proposal AES256-SHA256",
+            f"crypto map {crypto_map_name} {crypto_map_seq} set security-association lifetime seconds 28800"
+        ]
+        crypto_map_output = "\n".join(crypto_map_lines)
+        print("\n--- Crypto Map ---\n")
+        print(crypto_map_output)
+
         # Print crypto block if requested or if create_object_groups is used and no explicit flag
         crypto_requested = bool((cli and getattr(cli, 'print_crypto', False))) or bool(cli and getattr(cli, 'create_object_groups', False) and not getattr(cli, 'output', None))
         if crypto_requested:
@@ -282,9 +322,9 @@ def validate_networks(cli=None):
             mode = 'w'
             try:
                 with open(save, mode) as f:
-                    # include ACL line and NAT statement if present
+                    # include ACL line, NAT statement, and crypto map if present
                     if acl_name:
-                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n\n" + nat_line + "\n")
+                        f.write(src_block + "\n\n" + dst_block + "\n\n" + acl_line + "\n\n" + nat_line + "\n\n" + crypto_map_output + "\n")
                     else:
                         f.write(src_block + "\n\n" + dst_block + "\n")
                 print(f"\nSaved object-groups to: {save}")
@@ -305,6 +345,8 @@ def _build_arg_parser():
     p.add_argument('--acl-dest', dest='acl_dest', help='Short destination label used to build ACL name (script builds TO-<dest>-VPN)')
     p.add_argument('--nat-inside', dest='nat_inside', help='NAT Inside interface name (default: Inside)')
     p.add_argument('--nat-outside', dest='nat_outside', help='NAT Outside interface name (default: Outside)')
+    p.add_argument('--crypto-map-name', dest='crypto_map_name', help='Crypto map name (default: outside_map)')
+    p.add_argument('--crypto-map-seq', dest='crypto_map_seq', help='Crypto map sequence number (required for crypto map generation)')
     return p
 
 

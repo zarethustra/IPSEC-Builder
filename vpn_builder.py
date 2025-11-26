@@ -206,6 +206,7 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     """
     Handles all input retrieval (CLI or interactive prompt).
     Infers non-interactive mode if all required CLI arguments are present.
+    Incorporates immediate validation and reprompting for required inputs.
     """
     data = {}
     
@@ -221,20 +222,32 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     
     # Source Networks
     source_input = cli_args.sources
-    if not source_input: 
-        source_input = input("Enter source network(s) (CIDR or subnet mask, comma-separated): ").strip()
+    if not source_input:
+        while True:
+            source_input = input("Enter source network(s) (CIDR or subnet mask, comma-separated): ").strip()
+            if source_input:
+                break
+            print("Source networks are required.")
     data['sources'] = [entry.strip() for entry in source_input.split(",") if entry.strip()]
-    
+
     # Destination Networks
     dest_input = cli_args.destinations
     if not dest_input:
-        dest_input = input("\nEnter destination networks (comma-separated): ").strip()
+        while True:
+            dest_input = input("\nEnter destination networks (comma-separated): ").strip()
+            if dest_input:
+                break
+            print("Destination networks are required.")
     data['destinations'] = [entry.strip() for entry in dest_input.split(",") if entry.strip()]
 
     # Peer IP
     peer_input = str(cli_args.peer).strip() if cli_args.peer is not None else None
     if not peer_input:
-        peer_input = input("\nEnter peer IP address (IPv4 host or IPv4/32): ").strip()
+        while True:
+            peer_input = input("\nEnter peer IP address (IPv4 host or IPv4/32): ").strip()
+            if peer_input:
+                break
+            print("Peer IP is required.")
     data['peer_input'] = peer_input
 
     # Destination Name Input 
@@ -242,9 +255,17 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     if not dst_name_input:
         while True:
             dst_name_input = input("Enter destination name (will be formatted as VPN-{name}-REMOTE): ").strip()
-            if dst_name_input: break
-            print("Destination name is required. Please enter a name.")
-    
+            if not dst_name_input:
+                print("Destination name is required. Please enter a name.")
+                continue
+            try:
+                # Immediate name validation
+                _validate_config_name(dst_name_input, "Destination name")
+                break
+            except ValueError as e:
+                print(f"Invalid input: {e}")
+                
+    # Validate destination name even if it came from CLI
     _validate_config_name(dst_name_input, "Destination name")
     data['dst_name_input'] = dst_name_input.upper()
 
@@ -256,10 +277,12 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
         except ValueError:
             raise ValueError("Crypto map sequence (--crypto-map-seq) must be a valid integer.")
     else:
-        while data['crypto_map_seq'] is None:
+        while True:
             seq_input = input("Enter crypto map sequence number (required, integer): ").strip()
             try:
+                # Immediate integer validation
                 data['crypto_map_seq'] = int(seq_input)
+                break
             except ValueError:
                 print("Invalid input. Please enter a valid integer.")
                 
@@ -268,7 +291,8 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     if not data['pre_shared_key']:
         while True:
             data['pre_shared_key'] = input("\nEnter pre-shared key (required, non-empty): ").strip()
-            if data['pre_shared_key']: break
+            if data['pre_shared_key']: 
+                break
             print("Pre-shared key is required. Please enter a value.")
             
     
@@ -315,9 +339,6 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
 def validate_and_process_inputs(data: Dict[str, Any], cli_args: argparse.Namespace) -> Dict[str, Any]:
     """Performs strict validation on networks and peer IP."""
     
-    # Non-interactive mode requirement check is no longer explicitly needed here, 
-    # as get_required_inputs ensures all mandatory fields (CLI or prompt) are collected.
-    
     # 1. Network Validation
     data['valid_sources'], invalid_sources = _validate_ip_entries(data['sources'], 'source')
     data['valid_destinations'], invalid_destinations = _validate_ip_entries(data['destinations'], 'destination')
@@ -331,7 +352,6 @@ def validate_and_process_inputs(data: Dict[str, Any], cli_args: argparse.Namespa
     print("----------------------------------")
 
     # 2. Peer IP Validation
-    # peer_input is guaranteed to exist by get_required_inputs
     data['peer_value'] = _validate_peer_ip(data['peer_input'], cli_args.allow_private_peer)
     print(f"\n✅ Valid Peer IP: {data['peer_value']}")
     
@@ -414,7 +434,6 @@ def _build_arg_parser():
     p.add_argument('--sources', '-s', help='Comma-separated source networks (CIDR or subnet mask)')
     p.add_argument('--destinations', '-d', help='Comma-separated destination networks')
     p.add_argument('--peer', '-p', help='Peer IP (IPv4 host or /32)')
-    # Removed '--create-object-groups', '-c' argument
     p.add_argument('--src-name', '-sn', help='Source object-group name')
     p.add_argument('--dst-name', '-dn', help='Destination object-group name')
     p.add_argument('--output', '-o', help='File path to save configuration')

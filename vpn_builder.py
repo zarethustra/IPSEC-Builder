@@ -27,6 +27,11 @@ DEFAULT_INSIDE_IFACE = 'Inside'
 DEFAULT_OUTSIDE_IFACE = 'Outside'
 DEFAULT_CRYPTO_MAP_NAME = 'outside_map'
 
+# Validation Constants
+MIN_PSK_LENGTH = 8
+MAX_CMS_VALUE = 65535
+MIN_CMS_VALUE = 1
+
 
 # ----------------------------------------------------------------------
 # --- VALIDATION AND HELPER FUNCTIONS ---
@@ -167,8 +172,8 @@ REQUIRED ARGUMENTS (for non-interactive mode ):
   -s      --sources               Comma-separated source networks (CIDR or subnet mask) [REQUIRED]
   -d      --destinations          Comma-separated destination networks [REQUIRED]
   -dn     --dst-name              Destination object-group name [REQUIRED]
-  -cms    --crypto-map-seq        Crypto map sequence number (integer) [REQUIRED]
-  -psk    --pre-shared-key        Pre-shared key for tunnel-group [REQUIRED]
+  -cms    --crypto-map-seq        Crypto map sequence number (integer 1-65535) [REQUIRED]
+  -psk    --pre-shared-key        Pre-shared key (min 8 chars) for tunnel-group [REQUIRED]
   -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED]
 
 OPTIONAL ARGUMENTS WITH DEFAULTS:
@@ -210,15 +215,44 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     """
     data = {}
     
-    # 1. Determine non-interactive status (if all 6 required args are present)
+    # 1. Determine CLI presence for all required arguments
     required_cli_args = [
         cli_args.sources, cli_args.destinations, cli_args.peer, 
         cli_args.dst_name, cli_args.crypto_map_seq, cli_args.pre_shared_key
     ]
+    
+    # Flag 1: Non-interactive if ALL required arguments were provided on CLI
     is_non_interactive = all(arg is not None for arg in required_cli_args)
     data['is_non_interactive'] = is_non_interactive
+    
+    # Flag 2: Full interactive if NONE of the required arguments were provided on CLI
+    is_full_interactive_run = not any(arg is not None for arg in required_cli_args)
 
-    # --- Input Handling for REQUIRED Arguments ---
+
+    # --- CLI Input Pre-Validation for Config Names and Sequence/Key (Unchanged) ---
+    
+    # Optional Args Pre-Validation (must pass or fail early)
+    if cli_args.nat_inside:
+        _validate_config_name(cli_args.nat_inside, "NAT Inside interface name")
+    if cli_args.nat_outside:
+        _validate_config_name(cli_args.nat_outside, "NAT Outside interface name")
+    if cli_args.crypto_map_name:
+        _validate_config_name(cli_args.crypto_map_name, "Crypto map name")
+    
+    # Required Args Pre-Validation
+    if cli_args.crypto_map_seq is not None:
+        try:
+            val = int(cli_args.crypto_map_seq)
+            if not (MIN_CMS_VALUE <= val <= MAX_CMS_VALUE):
+                raise ValueError(f"Sequence number must be between {MIN_CMS_VALUE} and {MAX_CMS_VALUE}.")
+        except ValueError as e:
+            raise ValueError(f"Crypto map sequence error: {e}")
+
+    if cli_args.pre_shared_key and len(cli_args.pre_shared_key) < MIN_PSK_LENGTH:
+        raise ValueError(f"Pre-shared key must be at least {MIN_PSK_LENGTH} characters long.")
+
+    
+    # --- Input Handling for REQUIRED Arguments (Validation loops ensure we break on valid input) ---
     
     # Source Networks
     source_input = cli_args.sources
@@ -272,68 +306,111 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     # Crypto Map Sequence
     data['crypto_map_seq'] = None
     if cli_args.crypto_map_seq is not None:
-        try:
-            data['crypto_map_seq'] = int(cli_args.crypto_map_seq)
-        except ValueError:
-            raise ValueError("Crypto map sequence (--crypto-map-seq) must be a valid integer.")
+        data['crypto_map_seq'] = int(cli_args.crypto_map_seq) # Already validated in CLI pre-validation
     else:
         while True:
-            seq_input = input("Enter crypto map sequence number (required, integer): ").strip()
+            seq_input = input(f"Enter crypto map sequence number (required, integer {MIN_CMS_VALUE}-{MAX_CMS_VALUE}): ").strip()
             try:
-                # Immediate integer validation
-                data['crypto_map_seq'] = int(seq_input)
+                # Immediate integer and range validation
+                val = int(seq_input)
+                if not (MIN_CMS_VALUE <= val <= MAX_CMS_VALUE):
+                    raise ValueError(f"Sequence number must be between {MIN_CMS_VALUE} and {MAX_CMS_VALUE}.")
+                data['crypto_map_seq'] = val
                 break
-            except ValueError:
-                print("Invalid input. Please enter a valid integer.")
+            except ValueError as e:
+                print(f"Invalid input: {e}")
                 
     # Pre-shared Key
     data['pre_shared_key'] = cli_args.pre_shared_key
     if not data['pre_shared_key']:
         while True:
-            data['pre_shared_key'] = input("\nEnter pre-shared key (required, non-empty): ").strip()
-            if data['pre_shared_key']: 
+            data['pre_shared_key'] = input(f"\nEnter pre-shared key (required, min {MIN_PSK_LENGTH} characters): ").strip()
+            if not data['pre_shared_key']:
+                print("Pre-shared key is required. Please enter a value.")
+            elif len(data['pre_shared_key']) < MIN_PSK_LENGTH:
+                print(f"Pre-shared key must be at least {MIN_PSK_LENGTH} characters long.")
+            else:
                 break
-            print("Pre-shared key is required. Please enter a value.")
             
     
-    # --- Input Handling for OPTIONAL Arguments with Defaults (Uses inferred status) ---
+    # --- Input Handling for OPTIONAL Arguments with Defaults (Uses is_full_interactive_run flag) ---
 
     # Source Object-Group Name
     src_name = cli_args.src_name
     if src_name:
-        src_name = src_name
-    elif is_non_interactive:
-        src_name = DEFAULT_SRC_NAME
+        src_name = src_name 
+    elif is_full_interactive_run:
+        # FULL Interactive mode: Prompt user for optional defaults
+        while True:
+            src_name = input(f"Enter source object-group name [{DEFAULT_SRC_NAME}]: ").strip() or DEFAULT_SRC_NAME
+            try:
+                _validate_config_name(src_name, "Source name")
+                break
+            except ValueError as e:
+                print(f"Invalid input: {e}")
     else:
-        src_name = input(f"Enter source object-group name [{DEFAULT_SRC_NAME}]: ").strip() or DEFAULT_SRC_NAME
+        # Hybrid or Pure Non-interactive mode: use default silently
+        src_name = DEFAULT_SRC_NAME
         
-    _validate_config_name(src_name, "Source name")
     data['src_name'] = src_name
     
     # NAT Inside Interface Name
     if cli_args.nat_inside:
         data['nat_inside'] = cli_args.nat_inside
-    elif is_non_interactive:
-        data['nat_inside'] = DEFAULT_INSIDE_IFACE
+    elif is_full_interactive_run:
+        # FULL Interactive mode: Prompt user for optional defaults
+        while True:
+            nat_input = input(f"\nEnter NAT Inside interface name [{DEFAULT_INSIDE_IFACE}]: ").strip() or DEFAULT_INSIDE_IFACE
+            try:
+                _validate_config_name(nat_input, "NAT Inside interface name")
+                data['nat_inside'] = nat_input
+                break
+            except ValueError as e:
+                print(f"Invalid input: {e}")
     else:
-        data['nat_inside'] = input(f"\nEnter NAT Inside interface name [{DEFAULT_INSIDE_IFACE}]: ").strip() or DEFAULT_INSIDE_IFACE
+        # Hybrid or Pure Non-interactive mode: use default silently
+        data['nat_inside'] = DEFAULT_INSIDE_IFACE
 
     # NAT Outside Interface Name
     if cli_args.nat_outside:
         data['nat_outside'] = cli_args.nat_outside
-    elif is_non_interactive:
-        data['nat_outside'] = DEFAULT_OUTSIDE_IFACE
+    elif is_full_interactive_run:
+        # FULL Interactive mode: Prompt user for optional defaults
+        while True:
+            nat_input = input(f"Enter NAT Outside interface name [{DEFAULT_OUTSIDE_IFACE}]: ").strip() or DEFAULT_OUTSIDE_IFACE
+            try:
+                _validate_config_name(nat_input, "NAT Outside interface name")
+                data['nat_outside'] = nat_input
+                break
+            except ValueError as e:
+                print(f"Invalid input: {e}")
     else:
-        data['nat_outside'] = input(f"Enter NAT Outside interface name [{DEFAULT_OUTSIDE_IFACE}]: ").strip() or DEFAULT_OUTSIDE_IFACE
+        # Hybrid or Pure Non-interactive mode: use default silently
+        data['nat_outside'] = DEFAULT_OUTSIDE_IFACE
 
     # Crypto Map Name
     if cli_args.crypto_map_name:
         data['crypto_map_name'] = cli_args.crypto_map_name
-    elif is_non_interactive:
-        data['crypto_map_name'] = DEFAULT_CRYPTO_MAP_NAME
+    elif is_full_interactive_run:
+        # FULL Interactive mode: Prompt user for optional defaults
+        while True:
+            crypto_input = input(f"\nEnter crypto map name [{DEFAULT_CRYPTO_MAP_NAME}]: ").strip() or DEFAULT_CRYPTO_MAP_NAME
+            try:
+                _validate_config_name(crypto_input, "Crypto map name")
+                data['crypto_map_name'] = crypto_input
+                break
+            except ValueError as e:
+                print(f"Invalid input: {e}")
     else:
-        data['crypto_map_name'] = input(f"\nEnter crypto map name [{DEFAULT_CRYPTO_MAP_NAME}]: ").strip() or DEFAULT_CRYPTO_MAP_NAME
+        # Hybrid or Pure Non-interactive mode: use default silently
+        data['crypto_map_name'] = DEFAULT_CRYPTO_MAP_NAME
             
+    # Final validation on optional names (must be done outside of interactive block for consistency)
+    _validate_config_name(data['src_name'], "Source name")
+    _validate_config_name(data['nat_inside'], "NAT Inside interface name")
+    _validate_config_name(data['nat_outside'], "NAT Outside interface name")
+    _validate_config_name(data['crypto_map_name'], "Crypto map name")
+    
     return data
 
 def validate_and_process_inputs(data: Dict[str, Any], cli_args: argparse.Namespace) -> Dict[str, Any]:

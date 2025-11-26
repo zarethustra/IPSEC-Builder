@@ -483,12 +483,13 @@ def generate_full_config(data: Dict[str, Any]) -> Tuple[str, str, str]:
 
 
 def save_config_to_file(file_path: str, config_content: str):
-    """Saves the configuration content to a file using pathlib."""
+    """Saves the configuration content to a file using pathlib, raising OSError on failure."""
     try:
         Path(file_path).write_text(config_content + "\n")
         print(f"\nSaved full configuration to: {file_path}")
     except OSError as e:
-        print(f"\nFailed to write file: {e}", file=sys.stderr)
+        # Re-raise with detailed context for the caller to handle
+        raise OSError(f"Failed to write to '{file_path}'. Reason: {e}")
 
 
 # ----------------------------------------------------------------------
@@ -564,14 +565,32 @@ if __name__ == "__main__":
 
         # Step 5: Handle Saving
         save_path = args.output
-        if not is_non_interactive and not args.output:
-            # Only prompt to save if running in interactive mode and no output file was specified
-            save_path = input("\nSave full configuration to file? (enter path or leave blank to skip): ").strip()
-
+        
         if save_path:
+            # Scenario 1: Path provided via CLI. Attempt to save. If it fails, the top-level try/except will catch it and exit.
             save_config_to_file(save_path, full_config)
+        
+        elif not is_non_interactive:
+            # Scenario 2: Interactive/Hybrid mode without CLI output path. Loop until success or user skips.
+            while True:
+                save_path_prompt = input("\nSave full configuration to file? (enter path or leave blank to skip): ").strip()
+                
+                if not save_path_prompt:
+                    print("Skipping file save.")
+                    break # User chose to skip saving
+                
+                try:
+                    # Use the common saving function
+                    save_config_to_file(save_path_prompt, full_config)
+                    break # Success
+                except OSError as e:
+                    # Catch and report the file save error, then loop to reprompt
+                    # Note: The save_config_to_file already formats the error message
+                    print(f"\n❌ FILE SAVE ERROR: {e}. Please try a different path.", file=sys.stderr)
+                    continue
+        # If is_non_interactive is True and args.output is None, saving is skipped silently, which is correct non-interactive behavior.
 
-    except (ValueError, FileNotFoundError) as e:
-        # Errors from validation functions will be caught here
+    except (ValueError, OSError) as e:
+        # Catch errors from validation functions (ValueError) and file I/O (OSError)
         print(f"\n❌ FATAL ERROR: {e}", file=sys.stderr)
         sys.exit(2)

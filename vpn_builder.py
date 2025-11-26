@@ -7,31 +7,46 @@ from pathlib import Path
 
 # --- Constants and Embedded Config ---
 
-IKEV2_CRYPTO = '''Phase1
+# Configuration Defaults and Constants consolidated into one dictionary
+TUNNEL_DEFAULTS = {
+    # Naming Defaults
+    "SRC_NAME": 'VPN-SOURCE-LOCAL',
+    "INSIDE_IFACE": 'Inside',
+    "OUTSIDE_IFACE": 'Outside',
+    "CRYPTO_MAP_NAME": 'outside_map',
+
+    # IKE/IPsec Parameters (IKEv2)
+    "IKEV2_P1_ENCRYPT": "aes-256",
+    "IKEV2_P1_INTEGRITY": "sha256",
+    "IKEV2_P1_GROUP": 14,
+    "IKEV2_P1_PRF": "sha256",
+    "IKEV2_P1_LIFETIME": 86400,
+
+    "IKEV2_P2_PROPOSAL_NAME": "AES256-SHA256",
+    "IKEV2_P2_ENCRYPT": "aes-256",
+    "IKEV2_P2_INTEGRITY": "sha-256",
+    "IKEV2_P2_LIFETIME": 28800, # Crypto map lifetime
+
+    # Validation Constants
+    "MIN_PSK_LENGTH": 8,
+    "MAX_CMS_VALUE": 65535,
+    "MIN_CMS_VALUE": 1,
+}
+
+# Embedded IKEv2 crypto config (printed when requested)
+IKEV2_CRYPTO = f'''Phase1
 crypto ikev2 policy 1
- encryption aes-256
- integrity sha256
- group 14
- prf sha256
- lifetime seconds 86400
+ encryption {TUNNEL_DEFAULTS["IKEV2_P1_ENCRYPT"]}
+ integrity {TUNNEL_DEFAULTS["IKEV2_P1_INTEGRITY"]}
+ group {TUNNEL_DEFAULTS["IKEV2_P1_GROUP"]}
+ prf {TUNNEL_DEFAULTS["IKEV2_P1_PRF"]}
+ lifetime seconds {TUNNEL_DEFAULTS["IKEV2_P1_LIFETIME"]}
 
 Phase2
-crypto ipsec ikev2 ipsec-proposal AES256-SHA256
- protocol esp encryption aes-256
- protocol esp integrity sha-256
+crypto ipsec ikev2 ipsec-proposal {TUNNEL_DEFAULTS["IKEV2_P2_PROPOSAL_NAME"]}
+ protocol esp encryption {TUNNEL_DEFAULTS["IKEV2_P2_ENCRYPT"]}
+ protocol esp integrity {TUNNEL_DEFAULTS["IKEV2_P2_INTEGRITY"]}
 '''
-
-# Configuration Defaults
-DEFAULT_SRC_NAME = 'VPN-SOURCE-LOCAL'
-DEFAULT_INSIDE_IFACE = 'Inside'
-DEFAULT_OUTSIDE_IFACE = 'Outside'
-DEFAULT_CRYPTO_MAP_NAME = 'outside_map'
-
-# Validation Constants
-MIN_PSK_LENGTH = 8
-MAX_CMS_VALUE = 65535
-MIN_CMS_VALUE = 1
-
 
 # ----------------------------------------------------------------------
 # --- VALIDATION AND HELPER FUNCTIONS ---
@@ -97,7 +112,7 @@ def _validate_peer_ip(peer_input: str, allow_private: bool) -> str:
 
 
 # ----------------------------------------------------------------------
-# --- CONFIGURATION GENERATION FUNCTIONS (Unchanged) ---
+# --- CONFIGURATION GENERATION FUNCTIONS ---
 # ----------------------------------------------------------------------
 
 def _format_object_group(group_name: str, networks: List[str]) -> str:
@@ -136,11 +151,14 @@ def _generate_nat_statement(nat_inside: str, nat_outside: str, src_name: str, ds
 
 def _generate_crypto_map(crypto_map_name: str, crypto_map_seq: int, acl_name: str, peer_ip: str) -> str:
     """Generates the crypto map lines."""
+    proposal_name = TUNNEL_DEFAULTS['IKEV2_P2_PROPOSAL_NAME']
+    lifetime = TUNNEL_DEFAULTS['IKEV2_P2_LIFETIME']
+    
     lines = [
         f"crypto map {crypto_map_name} {crypto_map_seq} match address {acl_name}",
         f"crypto map {crypto_map_name} {crypto_map_seq} set peer {peer_ip}",
-        f"crypto map {crypto_map_name} {crypto_map_seq} set ikev2 ipsec-proposal AES256-SHA256",
-        f"crypto map {crypto_map_name} {crypto_map_seq} set security-association lifetime seconds 28800"
+        f"crypto map {crypto_map_name} {crypto_map_seq} set ikev2 ipsec-proposal {proposal_name}",
+        f"crypto map {crypto_map_name} {crypto_map_seq} set security-association lifetime seconds {lifetime}"
     ]
     return "\n".join(lines)
 
@@ -165,24 +183,33 @@ def print_custom_help():
     Prints the manually formatted, categorized help section.
     References to the -c flag have been removed.
     """
-    formatted_help_content = """\
+    # Pull defaults from TUNNEL_DEFAULTS
+    min_cms = TUNNEL_DEFAULTS["MIN_CMS_VALUE"]
+    max_cms = TUNNEL_DEFAULTS["MAX_CMS_VALUE"]
+    min_psk = TUNNEL_DEFAULTS["MIN_PSK_LENGTH"]
+    src_name = TUNNEL_DEFAULTS["SRC_NAME"]
+    inside_iface = TUNNEL_DEFAULTS["INSIDE_IFACE"]
+    outside_iface = TUNNEL_DEFAULTS["OUTSIDE_IFACE"]
+    crypto_map_name = TUNNEL_DEFAULTS["CRYPTO_MAP_NAME"]
+
+    formatted_help_content = f"""\
 REQUIRED ARGUMENTS (for non-interactive mode ):
   Short   Long                    Description
   ------  ---------------------   ------------------------------------------
   -s      --sources               Comma-separated source networks (CIDR or subnet mask) [REQUIRED]
   -d      --destinations          Comma-separated destination networks [REQUIRED]
   -dn     --dst-name              Destination object-group name [REQUIRED]
-  -cms    --crypto-map-seq        Crypto map sequence number (integer 1-65535) [REQUIRED]
-  -psk    --pre-shared-key        Pre-shared key (min 8 chars) for tunnel-group [REQUIRED]
+  -cms    --crypto-map-seq        Crypto map sequence number (integer {min_cms}-{max_cms}) [REQUIRED]
+  -psk    --pre-shared-key        Pre-shared key (min {min_psk} chars) for tunnel-group [REQUIRED]
   -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED]
 
 OPTIONAL ARGUMENTS WITH DEFAULTS:
   Short   Long                    Description
   ------  ---------------------   ------------------------------------------
-  -sn     --src-name              Source object-group name [default: VPN-SOURCE-LOCAL]
-  -ni     --nat-inside            NAT Inside interface name [default: Inside]
-  -no     --nat-outside           NAT Outside interface name [default: Outside]
-  -cmn    --crypto-map-name       Crypto map name [default: outside_map]
+  -sn     --src-name              Source object-group name [default: {src_name}]
+  -ni     --nat-inside            NAT Inside interface name [default: {inside_iface}]
+  -no     --nat-outside           NAT Outside interface name [default: {outside_iface}]
+  -cmn    --crypto-map-name       Crypto map name [default: {crypto_map_name}]
 
 OPTIONAL OUTPUT/CONTROL ARGUMENTS:
   Short   Long                    Description
@@ -215,6 +242,17 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     """
     data = {}
     
+    # Validation Constants
+    MIN_PSK_LENGTH = TUNNEL_DEFAULTS["MIN_PSK_LENGTH"]
+    MAX_CMS_VALUE = TUNNEL_DEFAULTS["MAX_CMS_VALUE"]
+    MIN_CMS_VALUE = TUNNEL_DEFAULTS["MIN_CMS_VALUE"]
+    
+    # Naming Defaults
+    DEFAULT_SRC_NAME = TUNNEL_DEFAULTS["SRC_NAME"]
+    DEFAULT_INSIDE_IFACE = TUNNEL_DEFAULTS["INSIDE_IFACE"]
+    DEFAULT_OUTSIDE_IFACE = TUNNEL_DEFAULTS["OUTSIDE_IFACE"]
+    DEFAULT_CRYPTO_MAP_NAME = TUNNEL_DEFAULTS["CRYPTO_MAP_NAME"]
+
     # 1. Determine CLI presence for all required arguments
     required_cli_args = [
         cli_args.sources, cli_args.destinations, cli_args.peer, 
@@ -229,7 +267,7 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     is_full_interactive_run = not any(arg is not None for arg in required_cli_args)
 
 
-    # --- CLI Input Pre-Validation for Config Names and Sequence/Key (Unchanged) ---
+    # --- CLI Input Pre-Validation for Config Names and Sequence/Key ---
     
     # Optional Args Pre-Validation (must pass or fail early)
     if cli_args.nat_inside:
@@ -306,7 +344,7 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     # Crypto Map Sequence
     data['crypto_map_seq'] = None
     if cli_args.crypto_map_seq is not None:
-        data['crypto_map_seq'] = int(cli_args.crypto_map_seq) # Already validated in CLI pre-validation
+        data['crypto_map_seq'] = int(cli_args.crypto_map_seq) 
     else:
         while True:
             seq_input = input(f"Enter crypto map sequence number (required, integer {MIN_CMS_VALUE}-{MAX_CMS_VALUE}): ").strip()
@@ -497,6 +535,12 @@ def save_config_to_file(file_path: str, config_content: str):
 # ----------------------------------------------------------------------
 
 def _build_arg_parser():
+    # Pull defaults for help text
+    inside_iface = TUNNEL_DEFAULTS["INSIDE_IFACE"]
+    outside_iface = TUNNEL_DEFAULTS["OUTSIDE_IFACE"]
+    crypto_map_name = TUNNEL_DEFAULTS["CRYPTO_MAP_NAME"]
+    src_name = TUNNEL_DEFAULTS["SRC_NAME"]
+
     p = argparse.ArgumentParser(
         description='Create IPSec VPN configuration for Cisco ASA (Refactored)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -512,14 +556,14 @@ def _build_arg_parser():
     p.add_argument('--sources', '-s', help='Comma-separated source networks (CIDR or subnet mask)')
     p.add_argument('--destinations', '-d', help='Comma-separated destination networks')
     p.add_argument('--peer', '-p', help='Peer IP (IPv4 host or /32)')
-    p.add_argument('--src-name', '-sn', help='Source object-group name')
+    p.add_argument('--src-name', '-sn', help=f'Source object-group name')
     p.add_argument('--dst-name', '-dn', help='Destination object-group name')
     p.add_argument('--output', '-o', help='File path to save configuration')
     p.add_argument('--allow-private-peer', '-ap', dest='allow_private_peer', action='store_true', help='Allow private/non-global peer addresses')
     p.add_argument('--print-crypto', '-pc', dest='print_crypto', action='store_true', help='Print the embedded IKEv2 crypto config included in this script')
-    p.add_argument('--nat-inside', '-ni', dest='nat_inside', help=f'NAT Inside interface name (default: {DEFAULT_INSIDE_IFACE})')
-    p.add_argument('--nat-outside', '-no', dest='nat_outside', help=f'NAT Outside interface name (default: {DEFAULT_OUTSIDE_IFACE})')
-    p.add_argument('--crypto-map-name', '-cmn', dest='crypto_map_name', help=f'Crypto map name (default: {DEFAULT_CRYPTO_MAP_NAME})')
+    p.add_argument('--nat-inside', '-ni', dest='nat_inside', help=f'NAT Inside interface name (default: {inside_iface})')
+    p.add_argument('--nat-outside', '-no', dest='nat_outside', help=f'NAT Outside interface name (default: {outside_iface})')
+    p.add_argument('--crypto-map-name', '-cmn', dest='crypto_map_name', help=f'Crypto map name (default: {crypto_map_name})')
     p.add_argument('--crypto-map-seq', '-cms', dest='crypto_map_seq', help='Crypto map sequence number (required for crypto map generation)')
     p.add_argument('--pre-shared-key', '-psk', dest='pre_shared_key', help='Pre-shared key for tunnel-group (required in non-interactive mode)')
     return p

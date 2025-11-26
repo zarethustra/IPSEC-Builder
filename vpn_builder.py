@@ -92,11 +92,11 @@ def _validate_peer_ip(peer_input: str, allow_private: bool) -> str:
 
 
 # ----------------------------------------------------------------------
-# --- CONFIGURATION GENERATION FUNCTIONS ---
+# --- CONFIGURATION GENERATION FUNCTIONS (Unchanged) ---
 # ----------------------------------------------------------------------
 
 def _format_object_group(group_name: str, networks: List[str]) -> str:
-    # ... (Implementation kept as is) ...
+    """Generates the Cisco ASA object-group network configuration block."""
     lines = [f"object-group network {group_name}"]
     for n in networks:
         try:
@@ -117,10 +117,12 @@ def _format_object_group(group_name: str, networks: List[str]) -> str:
 
 
 def _generate_access_list(acl_name: str, src_name: str, dst_name: str) -> str:
+    """Generates the VPN-specific access-list statement."""
     return f"access-list {acl_name} extended permit ip object-group {src_name} object-group {dst_name}"
 
 
 def _generate_nat_statement(nat_inside: str, nat_outside: str, src_name: str, dst_name: str) -> str:
+    """Generates the NAT Exemption statement (no-nat for VPN traffic)."""
     return (
         f"nat ({nat_inside},{nat_outside}) source static {src_name} {src_name} "
         f"destination static {dst_name} {dst_name} no-proxy-arp route-lookup"
@@ -128,6 +130,7 @@ def _generate_nat_statement(nat_inside: str, nat_outside: str, src_name: str, ds
 
 
 def _generate_crypto_map(crypto_map_name: str, crypto_map_seq: int, acl_name: str, peer_ip: str) -> str:
+    """Generates the crypto map lines."""
     lines = [
         f"crypto map {crypto_map_name} {crypto_map_seq} match address {acl_name}",
         f"crypto map {crypto_map_name} {crypto_map_seq} set peer {peer_ip}",
@@ -138,6 +141,7 @@ def _generate_crypto_map(crypto_map_name: str, crypto_map_seq: int, acl_name: st
 
 
 def _generate_tunnel_group(peer_ip: str, pre_shared_key: str) -> str:
+    """Generates the tunnel-group configuration block."""
     lines = [
         f"tunnel-group {peer_ip} type ipsec-l2l",
         f"tunnel-group {peer_ip} ipsec-attributes",
@@ -152,7 +156,10 @@ def _generate_tunnel_group(peer_ip: str, pre_shared_key: str) -> str:
 # ----------------------------------------------------------------------
 
 def print_custom_help():
-    """Prints the manually formatted, categorized help section."""
+    """
+    Prints the manually formatted, categorized help section.
+    References to the -c flag have been removed.
+    """
     formatted_help_content = """\
 REQUIRED ARGUMENTS (for non-interactive mode ):
   Short   Long                    Description
@@ -162,11 +169,11 @@ REQUIRED ARGUMENTS (for non-interactive mode ):
   -dn     --dst-name              Destination object-group name [REQUIRED]
   -cms    --crypto-map-seq        Crypto map sequence number (integer) [REQUIRED]
   -psk    --pre-shared-key        Pre-shared key for tunnel-group [REQUIRED]
+  -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED]
 
 OPTIONAL ARGUMENTS WITH DEFAULTS:
   Short   Long                    Description
   ------  ---------------------   ------------------------------------------
-  -p      --peer                  Peer IP (IPv4 host or /32) [REQUIRED for validation]
   -sn     --src-name              Source object-group name [default: VPN-SOURCE-LOCAL]
   -ni     --nat-inside            NAT Inside interface name [default: Inside]
   -no     --nat-outside           NAT Outside interface name [default: Outside]
@@ -178,23 +185,17 @@ OPTIONAL OUTPUT/CONTROL ARGUMENTS:
   -o      --output                File path to save object-groups
   -ap     --allow-private-peer    Allow private/non-global peer addresses
   -pc     --print-crypto          Print the embedded IKEv2 crypto config
-  -c      --create-object-groups  Create object-group output without interactive prompt
 
 USAGE EXAMPLES:
   Interactive mode (prompts for values):
     python asa_vpn_creator.py
 
-  Non-interactive mode with required arguments (using SHORT versions):
-    python asa_vpn_creator.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+  Non-interactive mode (requires all REQUIRED arguments):
+    python asa_vpn_creator.py -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
       -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!"
 
-  Non-interactive mode with required arguments (using LONG versions):
-    python asa_vpn_creator.py --create-object-groups --sources 10.0.0.0/24 \\
-      --destinations 192.168.0.0/24 --peer 203.0.113.1 --dst-name VPN-DESTINATION-REMOTE \\
-      --crypto-map-seq 5 --pre-shared-key "SecureKey123!"
-
-  Non-interactive mode with custom NAT and crypto map (SHORT versions):
-    python asa_vpn_creator.py -c -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
+  Non-interactive mode with custom NAT and crypto map:
+    python asa_vpn_creator.py -s 10.0.0.0/24 -d 192.168.0.0/24 -p 203.0.113.1 \\
       -dn VPN-DESTINATION-REMOTE -cms 5 -psk "SecureKey123!" \\
       -ni LAN -no WAN -cmn site1_vpn -o config.txt
 """
@@ -203,11 +204,20 @@ USAGE EXAMPLES:
 
 def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
     """
-    Handles all input retrieval (CLI or interactive prompt) and basic validation.
+    Handles all input retrieval (CLI or interactive prompt).
+    Infers non-interactive mode if all required CLI arguments are present.
     """
     data = {}
     
-    # --- Input Handling ---
+    # 1. Determine non-interactive status (if all 6 required args are present)
+    required_cli_args = [
+        cli_args.sources, cli_args.destinations, cli_args.peer, 
+        cli_args.dst_name, cli_args.crypto_map_seq, cli_args.pre_shared_key
+    ]
+    is_non_interactive = all(arg is not None for arg in required_cli_args)
+    data['is_non_interactive'] = is_non_interactive
+
+    # --- Input Handling for REQUIRED Arguments ---
     
     # Source Networks
     source_input = cli_args.sources
@@ -227,12 +237,7 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
         peer_input = input("\nEnter peer IP address (IPv4 host or IPv4/32): ").strip()
     data['peer_input'] = peer_input
 
-    # Source Object-Group Name
-    src_name = cli_args.src_name if cli_args.src_name else input(f"Enter source object-group name [{DEFAULT_SRC_NAME}]: ").strip() or DEFAULT_SRC_NAME
-    _validate_config_name(src_name, "Source name")
-    data['src_name'] = src_name
-
-    # Destination Name Input (New Validation integrated here)
+    # Destination Name Input 
     dst_name_input = cli_args.dst_name
     if not dst_name_input:
         while True:
@@ -240,17 +245,8 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
             if dst_name_input: break
             print("Destination name is required. Please enter a name.")
     
-    # --- CRITICAL NEW VALIDATION ---
     _validate_config_name(dst_name_input, "Destination name")
-    # -------------------------------
     data['dst_name_input'] = dst_name_input.upper()
-
-    # NAT Interfaces
-    data['nat_inside'] = cli_args.nat_inside if cli_args.nat_inside else input(f"\nEnter NAT Inside interface name [{DEFAULT_INSIDE_IFACE}]: ").strip() or DEFAULT_INSIDE_IFACE
-    data['nat_outside'] = cli_args.nat_outside if cli_args.nat_outside else input(f"Enter NAT Outside interface name [{DEFAULT_OUTSIDE_IFACE}]: ").strip() or DEFAULT_OUTSIDE_IFACE
-
-    # Crypto Map Name
-    data['crypto_map_name'] = cli_args.crypto_map_name if cli_args.crypto_map_name else input(f"\nEnter crypto map name [{DEFAULT_CRYPTO_MAP_NAME}]: ").strip() or DEFAULT_CRYPTO_MAP_NAME
 
     # Crypto Map Sequence
     data['crypto_map_seq'] = None
@@ -275,19 +271,54 @@ def get_required_inputs(cli_args: argparse.Namespace) -> Dict[str, Any]:
             if data['pre_shared_key']: break
             print("Pre-shared key is required. Please enter a value.")
             
+    
+    # --- Input Handling for OPTIONAL Arguments with Defaults (Uses inferred status) ---
+
+    # Source Object-Group Name
+    src_name = cli_args.src_name
+    if src_name:
+        src_name = src_name
+    elif is_non_interactive:
+        src_name = DEFAULT_SRC_NAME
+    else:
+        src_name = input(f"Enter source object-group name [{DEFAULT_SRC_NAME}]: ").strip() or DEFAULT_SRC_NAME
+        
+    _validate_config_name(src_name, "Source name")
+    data['src_name'] = src_name
+    
+    # NAT Inside Interface Name
+    if cli_args.nat_inside:
+        data['nat_inside'] = cli_args.nat_inside
+    elif is_non_interactive:
+        data['nat_inside'] = DEFAULT_INSIDE_IFACE
+    else:
+        data['nat_inside'] = input(f"\nEnter NAT Inside interface name [{DEFAULT_INSIDE_IFACE}]: ").strip() or DEFAULT_INSIDE_IFACE
+
+    # NAT Outside Interface Name
+    if cli_args.nat_outside:
+        data['nat_outside'] = cli_args.nat_outside
+    elif is_non_interactive:
+        data['nat_outside'] = DEFAULT_OUTSIDE_IFACE
+    else:
+        data['nat_outside'] = input(f"Enter NAT Outside interface name [{DEFAULT_OUTSIDE_IFACE}]: ").strip() or DEFAULT_OUTSIDE_IFACE
+
+    # Crypto Map Name
+    if cli_args.crypto_map_name:
+        data['crypto_map_name'] = cli_args.crypto_map_name
+    elif is_non_interactive:
+        data['crypto_map_name'] = DEFAULT_CRYPTO_MAP_NAME
+    else:
+        data['crypto_map_name'] = input(f"\nEnter crypto map name [{DEFAULT_CRYPTO_MAP_NAME}]: ").strip() or DEFAULT_CRYPTO_MAP_NAME
+            
     return data
 
 def validate_and_process_inputs(data: Dict[str, Any], cli_args: argparse.Namespace) -> Dict[str, Any]:
     """Performs strict validation on networks and peer IP."""
     
-    # 1. Non-Interactive Mode Requirements Check
-    if cli_args.create_object_groups:
-        required = ['sources', 'destinations', 'dst_name_input', 'crypto_map_seq', 'pre_shared_key', 'peer_input']
-        missing = [arg for arg in required if not data.get(arg)]
-        if missing:
-            raise ValueError(f"Missing required arguments in non-interactive mode (-c): {', '.join(missing)}")
+    # Non-interactive mode requirement check is no longer explicitly needed here, 
+    # as get_required_inputs ensures all mandatory fields (CLI or prompt) are collected.
     
-    # 2. Network Validation
+    # 1. Network Validation
     data['valid_sources'], invalid_sources = _validate_ip_entries(data['sources'], 'source')
     data['valid_destinations'], invalid_destinations = _validate_ip_entries(data['destinations'], 'destination')
 
@@ -299,7 +330,8 @@ def validate_and_process_inputs(data: Dict[str, Any], cli_args: argparse.Namespa
     for net in invalid_destinations: print(f"❌ Invalid destination entry skipped: {net}")
     print("----------------------------------")
 
-    # 3. Peer IP Validation
+    # 2. Peer IP Validation
+    # peer_input is guaranteed to exist by get_required_inputs
     data['peer_value'] = _validate_peer_ip(data['peer_input'], cli_args.allow_private_peer)
     print(f"\n✅ Valid Peer IP: {data['peer_value']}")
     
@@ -382,8 +414,7 @@ def _build_arg_parser():
     p.add_argument('--sources', '-s', help='Comma-separated source networks (CIDR or subnet mask)')
     p.add_argument('--destinations', '-d', help='Comma-separated destination networks')
     p.add_argument('--peer', '-p', help='Peer IP (IPv4 host or /32)')
-    p.add_argument('--create-object-groups', '-c', dest='create_object_groups', action='store_true', 
-                   help='Create object-group output without interactive prompt (requires all other inputs)')
+    # Removed '--create-object-groups', '-c' argument
     p.add_argument('--src-name', '-sn', help='Source object-group name')
     p.add_argument('--dst-name', '-dn', help='Destination object-group name')
     p.add_argument('--output', '-o', help='File path to save configuration')
@@ -414,7 +445,10 @@ if __name__ == "__main__":
         # Step 1: Get all inputs (CLI or Interactive)
         config_data = get_required_inputs(args)
         
-        # Step 2: Perform Validation (handles -c logic check)
+        # Determine non-interactive status for final flow control
+        is_non_interactive = config_data.get('is_non_interactive', False) 
+        
+        # Step 2: Perform Validation 
         config_data = validate_and_process_inputs(config_data, args)
         
         # Step 3: Generate Configuration
@@ -427,15 +461,15 @@ if __name__ == "__main__":
         print(full_config)
         print("\n" + "="*50)
 
-        # Print Crypto Config if requested
-        if args.print_crypto or (args.create_object_groups and not args.output):
+        # Print Crypto Config if requested (Only print if non-interactive mode and no specific output file was specified)
+        if args.print_crypto or (is_non_interactive and not args.output):
             print('\n--- Recommended IKEv2 Crypto Config ---\n')
             print(IKEV2_CRYPTO.rstrip())
 
         # Step 5: Handle Saving
         save_path = args.output
-        if not args.create_object_groups and not args.output:
-            # Only prompt to save if running interactively and no output file was specified
+        if not is_non_interactive and not args.output:
+            # Only prompt to save if running in interactive mode and no output file was specified
             save_path = input("\nSave full configuration to file? (enter path or leave blank to skip): ").strip()
 
         if save_path:
